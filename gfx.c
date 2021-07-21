@@ -9,6 +9,8 @@ typedef struct {
     SDL_Surface* surface;
     int width;
     int height;
+    int x;
+    int y;
     char* title;
     uint fullscreen;
 } JSGfxData;
@@ -51,6 +53,8 @@ static JSValue js_gfx_ctor(JSContext *ctx,
     s->window = NULL;
     s->surface = NULL;
     s->fullscreen = 0;
+    s->x = SDL_WINDOWPOS_UNDEFINED;
+    s->y = SDL_WINDOWPOS_UNDEFINED;
     /* using new_target to get the prototype is necessary when the
        class is extended. */
     proto = JS_GetPropertyStr(ctx, new_target, "prototype");
@@ -120,6 +124,36 @@ static JSValue js_gfx_set_title(JSContext *ctx, JSValueConst this_val, JSValue v
     if(s->window != NULL)
         SDL_SetWindowTitle(s->window, s->title);
 
+    return JS_UNDEFINED;
+}
+
+static JSValue js_gfx_get_pos(JSContext *ctx, JSValueConst this_val, int magic)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_EXCEPTION;
+    if(s->window != NULL)
+        SDL_GetWindowPosition(s->window, &s->x, &s->y);
+    if (magic == 0)
+        return JS_NewInt32(ctx, s->x);
+    else
+        return JS_NewInt32(ctx, s->y);
+}
+
+static JSValue js_gfx_set_pos(JSContext *ctx, JSValueConst this_val, JSValue val, int magic)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    int v;
+    if (!s)
+        return JS_EXCEPTION;
+    if (JS_ToInt32(ctx, &v, val))
+        return JS_EXCEPTION;
+    if (magic == 0)
+        s->x = v;
+    else
+        s->y = v;
+    if(s->window != NULL)
+        SDL_SetWindowPosition(s->window, s->x, s->y);
     return JS_UNDEFINED;
 }
 
@@ -437,17 +471,51 @@ static JSValue js_gfx_rgb(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    JSValue vr,vg,vb,va;
     uint r,g,b,a;
-    if (JS_ToUint32(ctx, &r, argv[0]))
+    if(!JS_IsObject(argv[0]))
+    {
+        if(argc < 3) return JS_EXCEPTION;
+        vr = argv[0];
+        vg = argv[1];
+        vb = argv[2];
+        va = JS_UNDEFINED;
+        if(argc >= 4) va = argv[3];
+    }
+    else
+    {
+        vr = JS_GetPropertyStr(ctx, argv[0], "r");
+        vg = JS_GetPropertyStr(ctx, argv[0], "g");
+        vb = JS_GetPropertyStr(ctx, argv[0], "b");
+        va = JS_GetPropertyStr(ctx, argv[0], "a");
+    }
+    if (JS_ToUint32(ctx, &r, vr))
         return JS_EXCEPTION;
-    if (JS_ToUint32(ctx, &g, argv[1]))
+    if (JS_ToUint32(ctx, &g, vg))
         return JS_EXCEPTION;
-    if (JS_ToUint32(ctx, &b, argv[2]))
+    if (JS_ToUint32(ctx, &b, vb))
         return JS_EXCEPTION;
-    if (JS_ToUint32(ctx, &a, argv[3]))
+    if (JS_ToUint32(ctx, &a, va))
         return JS_NewUint32(ctx, SDL_MapRGB(s->surface->format, r, g, b));
     else
         return JS_NewUint32(ctx, SDL_MapRGBA(s->surface->format, r, g, b, a));
+}
+
+
+static JSValue js_gfx_torgb(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    uint pixel; u_char r, g, b, a;
+    if (JS_ToUint32(ctx, &pixel, argv[0]))
+        return JS_EXCEPTION;
+    SDL_GetRGBA(pixel, s->surface->format, &r, &g, &b, &a);
+    JSValue rgb = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, rgb, "r", JS_NewUint32(ctx, r));
+    JS_SetPropertyStr(ctx, rgb, "g", JS_NewUint32(ctx, g));
+    JS_SetPropertyStr(ctx, rgb, "b", JS_NewUint32(ctx, b));
+    JS_SetPropertyStr(ctx, rgb, "a", JS_NewUint32(ctx, a));
+    return rgb;
 }
 
 static JSValue js_gfx_fillrect(JSContext *ctx, JSValueConst this_val,
@@ -492,6 +560,18 @@ static JSValue js_gfx_windowid(JSContext *ctx, JSValueConst this_val)
         return JS_UNDEFINED;
 }
 
+static JSValue js_gfx_bytespp(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    return JS_NewUint32(ctx, s->surface->format->BytesPerPixel);
+}
+
+static JSValue js_gfx_bitspp(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    return JS_NewUint32(ctx, s->surface->format->BitsPerPixel);
+}
+
 static JSValue js_gfx_get_fullscreen(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
@@ -515,6 +595,27 @@ static JSValue js_gfx_set_fullscreen(JSContext *ctx, JSValueConst this_val, JSVa
     return JS_UNDEFINED;
 }
 
+static JSValue js_gfx_get_pixels(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    //SDL_LockSurface(s->surface);
+    JSValue pixels = JS_NewArrayBuffer(ctx, s->surface->pixels, s->surface->h * s->surface->pitch, NULL, NULL, 0);
+    //SDL_UnlockSurface(s->surface);
+    return pixels;
+}
+
+static JSValue js_gfx_set_pixels(JSContext *ctx, JSValueConst this_val, JSValue val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    //SDL_LockSurface(s->surface);
+    size_t size; // s->surface->h * s->surface->pitch
+    u_char* buf = JS_GetArrayBuffer(ctx, &size, val);
+    if(size > s->surface->h * s->surface->pitch) size = s->surface->h * s->surface->pitch;
+    SDL_memcpy(s->surface->pixels, buf, size);
+    //SDL_UnlockSurface(s->surface);
+    return JS_UNDEFINED;
+}
+
 static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
@@ -529,7 +630,7 @@ static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,
     if(SDL_Init(flags) < 0)
         return JS_EXCEPTION;
 
-    s->window = SDL_CreateWindow(s->title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, s->width, s->height, SDL_WINDOW_SHOWN);
+    s->window = SDL_CreateWindow(s->title, s->x, s->y, s->width, s->height, SDL_WINDOW_SHOWN);
 
     if(s->window==NULL)
         return JS_EXCEPTION;
@@ -549,8 +650,11 @@ static JSClassDef js_gfx_class = {
 static const JSCFunctionListEntry js_gfx_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("width", js_gfx_get_size, js_gfx_set_size, 0),
     JS_CGETSET_MAGIC_DEF("height", js_gfx_get_size, js_gfx_set_size, 1),
+    JS_CGETSET_MAGIC_DEF("x", js_gfx_get_pos, js_gfx_set_pos, 0),
+    JS_CGETSET_MAGIC_DEF("y", js_gfx_get_pos, js_gfx_set_pos, 1),
     JS_CGETSET_DEF("title", js_gfx_get_title, js_gfx_set_title),
     JS_CGETSET_DEF("fullscreen", js_gfx_get_fullscreen, js_gfx_set_fullscreen),
+    JS_CGETSET_DEF("pixels", js_gfx_get_pixels, js_gfx_set_pixels),
     JS_CGETSET_DEF("ticks", js_gfx_ticks, NULL),
     JS_CGETSET_DEF("windowID", js_gfx_windowid, NULL),
     JS_CFUNC_DEF("initialize", 1, js_gfx_initialize),
@@ -563,8 +667,11 @@ static const JSCFunctionListEntry js_gfx_proto_funcs[] = {
     JS_ALIAS_DEF("on", "addEventListener"),
     JS_ALIAS_DEF("off", "removeEventListener"),
     JS_CFUNC_DEF("update", 0, js_gfx_update),
-    JS_CFUNC_DEF("rgb", 3, js_gfx_rgb),
+    JS_CFUNC_DEF("rgb", 1, js_gfx_rgb),
+    JS_CFUNC_DEF("torgb", 1, js_gfx_torgb),
     JS_CFUNC_DEF("fillRect", 1, js_gfx_fillrect),
+    JS_CGETSET_DEF("bytesperpixel", js_gfx_bytespp, NULL),
+    JS_CGETSET_DEF("bitsperpixel", js_gfx_bitspp, NULL),
 };
 
 static int js_gfx_init(JSContext *ctx, JSModuleDef *m)

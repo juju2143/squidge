@@ -28,9 +28,13 @@ console.log(gfx.width, gfx.height, gfx.title);
 var oldd = gfx.ticks;
 var newd;
 gfx.fillRect(gfx.rgb(255,255,255));
+console.log(gfx.pixels.byteLength);
+var pixels = new Uint32Array(gfx.pixels);
 while(quit)
 {
     gfx.pollEvent();
+    for(var x=10;x<20;x++) for(var y=10;y<20;y++)
+        pixels[y*gfx.width+x] = gfx.ticks;
     gfx.update();
     newd = gfx.ticks;
     var tme = Math.round(1000/(newd - oldd));
