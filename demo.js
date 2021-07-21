@@ -3,7 +3,7 @@ var gfx = new Graphics(1024, 768, "test");
 var quit = true;
 function onkey(e)
 {
-    //console.log(e.timestamp, "- keyevent - isPressed", e.state, "- key", e.keycode);
+    //console.log(e.timestamp, "- keyevent - isPressed", e.state, "- key", e.key);
     if(e.state && e.keycode == 101)
     {
         gfx.fillRect(gfx.rgb(255,255,255));
@@ -25,14 +25,14 @@ gfx.on("quit", onquit);
 gfx.on("mousemove", onmousemove);
 gfx.initialize();
 console.log(gfx.width, gfx.height, gfx.title);
-var oldd = (new Date()).getTime();
+var oldd = gfx.ticks;
 var newd;
 gfx.fillRect(gfx.rgb(255,255,255));
 while(quit)
 {
     gfx.pollEvent();
     gfx.update();
-    newd = (new Date()).getTime();
+    newd = gfx.ticks;
     var tme = Math.round(1000/(newd - oldd));
     gfx.title = "test - fps: " + tme;
     oldd = newd;

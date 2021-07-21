@@ -10,6 +10,7 @@ typedef struct {
     int width;
     int height;
     char* title;
+    uint fullscreen;
 } JSGfxData;
 
 static JSClassID js_gfx_class_id;
@@ -47,6 +48,9 @@ static JSValue js_gfx_ctor(JSContext *ctx,
         s->title = "Squidge";
     else
         s->title = JS_ToCString(ctx, argv[2]);
+    s->window = NULL;
+    s->surface = NULL;
+    s->fullscreen = 0;
     /* using new_target to get the prototype is necessary when the
        class is extended. */
     proto = JS_GetPropertyStr(ctx, new_target, "prototype");
@@ -154,6 +158,7 @@ static JSValue js_gfx_update(JSContext *ctx, JSValueConst this_val,
 typedef struct eventlist {
     struct eventlist *next;
     int type;
+    int subtype;
     JSValue func;
     JSValue this;
 } event_t;
@@ -174,6 +179,8 @@ JSValue createEventObject(JSContext *ctx, SDL_Event e)
             JS_SetPropertyStr(ctx, ev, "repeat", JS_NewBool(ctx, e.key.repeat != 0));
             JS_SetPropertyStr(ctx, ev, "scancode", JS_NewUint32(ctx, e.key.keysym.scancode));
             JS_SetPropertyStr(ctx, ev, "keycode", JS_NewUint32(ctx, e.key.keysym.sym));
+            JS_SetPropertyStr(ctx, ev, "scan", JS_NewString(ctx, SDL_GetScancodeName(e.key.keysym.scancode)));
+            JS_SetPropertyStr(ctx, ev, "key", JS_NewString(ctx, SDL_GetKeyName(e.key.keysym.sym)));
             JS_SetPropertyStr(ctx, ev, "mod", JS_NewUint32(ctx, e.key.keysym.mod));
             break;
         case SDL_MOUSEMOTION:
@@ -205,8 +212,77 @@ JSValue createEventObject(JSContext *ctx, SDL_Event e)
             JS_SetPropertyStr(ctx, ev, "y", JS_NewInt32(ctx, e.wheel.y));
             JS_SetPropertyStr(ctx, ev, "direction", JS_NewBool(ctx, e.wheel.direction != 0));
             break;
+        case SDL_CONTROLLERAXISMOTION:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.caxis.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.caxis.which));
+            JS_SetPropertyStr(ctx, ev, "axis", JS_NewUint32(ctx, e.caxis.axis));
+            JS_SetPropertyStr(ctx, ev, "state", JS_NewInt32(ctx, e.caxis.value));
+            break;
+        case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONUP:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.cbutton.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.cbutton.which));
+            JS_SetPropertyStr(ctx, ev, "button", JS_NewUint32(ctx, e.cbutton.button));
+            JS_SetPropertyStr(ctx, ev, "state", JS_NewBool(ctx, e.cbutton.state != 0));
+            break;
+        case SDL_CONTROLLERDEVICEADDED:
+        case SDL_CONTROLLERDEVICEREMOVED:
+        case SDL_CONTROLLERDEVICEREMAPPED:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.cdevice.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.cdevice.which));
+            break;
+        case SDL_JOYAXISMOTION:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.jaxis.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.jaxis.which));
+            JS_SetPropertyStr(ctx, ev, "axis", JS_NewUint32(ctx, e.jaxis.axis));
+            JS_SetPropertyStr(ctx, ev, "value", JS_NewInt32(ctx, e.jaxis.value));
+            break;
+        case SDL_JOYBALLMOTION:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.jball.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.jball.which));
+            JS_SetPropertyStr(ctx, ev, "ball", JS_NewUint32(ctx, e.jball.ball));
+            JS_SetPropertyStr(ctx, ev, "xrel", JS_NewInt32(ctx, e.jball.xrel));
+            JS_SetPropertyStr(ctx, ev, "yrel", JS_NewInt32(ctx, e.jball.yrel));
+            break;
+        case SDL_JOYHATMOTION:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.jhat.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.jhat.which));
+            JS_SetPropertyStr(ctx, ev, "hat", JS_NewUint32(ctx, e.jhat.hat));
+            JS_SetPropertyStr(ctx, ev, "value", JS_NewUint32(ctx, e.jhat.value));
+            break;
+        case SDL_JOYBUTTONDOWN:
+        case SDL_JOYBUTTONUP:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.jbutton.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.jbutton.which));
+            JS_SetPropertyStr(ctx, ev, "button", JS_NewUint32(ctx, e.jbutton.button));
+            JS_SetPropertyStr(ctx, ev, "state", JS_NewBool(ctx, e.jbutton.state != 0));
+            break;
+        case SDL_JOYDEVICEADDED:
+        case SDL_JOYDEVICEREMOVED:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.jdevice.timestamp));
+            JS_SetPropertyStr(ctx, ev, "which", JS_NewInt32(ctx, e.jdevice.which));
+            break;
         case SDL_QUIT:
             JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.quit.timestamp));
+            break;
+        case SDL_WINDOWEVENT:
+            JS_SetPropertyStr(ctx, ev, "timestamp", JS_NewUint32(ctx, e.window.timestamp));
+            JS_SetPropertyStr(ctx, ev, "windowID", JS_NewUint32(ctx, e.window.windowID));
+            JS_SetPropertyStr(ctx, ev, "event", JS_NewUint32(ctx, e.window.event));
+            switch(e.window.event)
+            {
+                case SDL_WINDOWEVENT_MOVED:
+                    JS_SetPropertyStr(ctx, ev, "x", JS_NewInt32(ctx, e.window.data1));
+                    JS_SetPropertyStr(ctx, ev, "y", JS_NewInt32(ctx, e.window.data2));
+                    break;
+                case SDL_WINDOWEVENT_RESIZED:
+                case SDL_WINDOWEVENT_SIZE_CHANGED:
+                    JS_SetPropertyStr(ctx, ev, "width", JS_NewInt32(ctx, e.window.data1));
+                    JS_SetPropertyStr(ctx, ev, "height", JS_NewInt32(ctx, e.window.data2));
+                    break;
+                default:
+                    break;
+            }
             break;
         default:
             break;
@@ -219,7 +295,7 @@ void callEvent(JSContext *ctx, SDL_Event e)
     event_t *ev;
     for(ev = events; ev != NULL; ev = ev->next)
     {
-        if(e.type == ev->type)
+        if((e.type == ev->type && e.type != SDL_WINDOWEVENT) || (e.type == SDL_WINDOWEVENT && e.window.event == ev->subtype))
         {
             int fargc = 1;
             JSValue* fargv = (JSValue*)malloc(sizeof(JSValue) * fargc);
@@ -264,14 +340,43 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
 
     const char* name = JS_ToCString(ctx, argv[0]);
 
-    int event = 0;
+    int event = 0, subevent = 0;
     if(strcmp(name, "keydown") == 0) event = SDL_KEYDOWN;
     if(strcmp(name, "keyup") == 0) event = SDL_KEYUP;
     if(strcmp(name, "mousemove") == 0) event = SDL_MOUSEMOTION;
     if(strcmp(name, "mousedown") == 0) event = SDL_MOUSEBUTTONDOWN;
     if(strcmp(name, "mouseup") == 0) event = SDL_MOUSEBUTTONUP;
     if(strcmp(name, "mousewheel") == 0) event = SDL_MOUSEWHEEL;
+    if(strcmp(name, "controlleraxismove") == 0) event = SDL_CONTROLLERAXISMOTION;
+    if(strcmp(name, "controllerbtndown") == 0) event = SDL_CONTROLLERBUTTONDOWN;
+    if(strcmp(name, "controllerbtnup") == 0) event = SDL_CONTROLLERBUTTONUP;
+    if(strcmp(name, "controlleradd") == 0) event = SDL_CONTROLLERDEVICEADDED;
+    if(strcmp(name, "controllerremove") == 0) event = SDL_CONTROLLERDEVICEREMOVED;
+    if(strcmp(name, "controllerremap") == 0) event = SDL_CONTROLLERDEVICEREMAPPED;
+    if(strcmp(name, "joyaxismove") == 0) event = SDL_JOYAXISMOTION;
+    if(strcmp(name, "joyballmove") == 0) event = SDL_JOYBALLMOTION;
+    if(strcmp(name, "joyhatmove") == 0) event = SDL_JOYHATMOTION;
+    if(strcmp(name, "joybtndown") == 0) event = SDL_JOYBUTTONDOWN;
+    if(strcmp(name, "joybtnup") == 0) event = SDL_JOYBUTTONUP;
+    if(strcmp(name, "joyadd") == 0) event = SDL_JOYDEVICEADDED;
+    if(strcmp(name, "joyremove") == 0) event = SDL_JOYDEVICEREMOVED;
     if(strcmp(name, "quit") == 0) event = SDL_QUIT;
+    if(strcmp(name, "show") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_SHOWN; }
+    if(strcmp(name, "hide") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_HIDDEN; }
+    if(strcmp(name, "expose") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_EXPOSED; }
+    if(strcmp(name, "move") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_MOVED; }
+    if(strcmp(name, "resize") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_RESIZED; }
+    if(strcmp(name, "sizechange") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_SIZE_CHANGED; }
+    if(strcmp(name, "minimize") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_MINIMIZED; }
+    if(strcmp(name, "maximize") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_MAXIMIZED; }
+    if(strcmp(name, "restore") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_RESTORED; }
+    if(strcmp(name, "focus") == 0 || strcmp(name, "enter") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_ENTER; }
+    if(strcmp(name, "blur") == 0 || strcmp(name, "leave") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_LEAVE; }
+    if(strcmp(name, "keyfocus") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_FOCUS_GAINED; }
+    if(strcmp(name, "keyblur") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_FOCUS_LOST; }
+    if(strcmp(name, "close") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_CLOSE; }
+
+    if(event == 0) return JS_EXCEPTION;
 
     if(magic == 1)
     {
@@ -285,6 +390,7 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
                 ev->next = (event_t*)malloc(sizeof(event_t));
                 //if(ev->next == NULL) return JS_EXCEPTION;
                 ev->next->type = event;
+                ev->next->subtype = subevent;
                 ev->next->func = argv[1];
                 ev->next->this = argv[1];
                 ev->next->next = NULL;
@@ -294,6 +400,7 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
                 events = (event_t*)malloc(sizeof(event_t));
                 //if(ev->next == NULL) return JS_EXCEPTION;
                 events->type = event;
+                events->subtype = subevent;
                 events->func = argv[1];
                 events->this = argv[1];
                 events->next = NULL;
@@ -371,6 +478,43 @@ static JSValue js_gfx_fillrect(JSContext *ctx, JSValueConst this_val,
     }
 }
 
+static JSValue js_gfx_ticks(JSContext *ctx, JSValueConst this_val)
+{
+    return JS_NewUint32(ctx, SDL_GetTicks());
+}
+
+static JSValue js_gfx_windowid(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if(s->window != NULL)
+        return JS_NewUint32(ctx, SDL_GetWindowID(s->window));
+    else
+        return JS_UNDEFINED;
+}
+
+static JSValue js_gfx_get_fullscreen(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    return JS_NewUint32(ctx, s->fullscreen);
+}
+
+static JSValue js_gfx_set_fullscreen(JSContext *ctx, JSValueConst this_val, JSValue val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    uint flags;
+
+    if(JS_ToUint32(ctx, &flags, val)) return JS_EXCEPTION;
+
+    if(s->window != NULL)
+    {
+        if(SDL_SetWindowFullscreen(s->window, flags) == 0)
+            s->fullscreen = flags;
+    }
+    else
+        s->fullscreen = flags;
+    return JS_UNDEFINED;
+}
+
 static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
@@ -406,6 +550,9 @@ static const JSCFunctionListEntry js_gfx_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("width", js_gfx_get_size, js_gfx_set_size, 0),
     JS_CGETSET_MAGIC_DEF("height", js_gfx_get_size, js_gfx_set_size, 1),
     JS_CGETSET_DEF("title", js_gfx_get_title, js_gfx_set_title),
+    JS_CGETSET_DEF("fullscreen", js_gfx_get_fullscreen, js_gfx_set_fullscreen),
+    JS_CGETSET_DEF("ticks", js_gfx_ticks, NULL),
+    JS_CGETSET_DEF("windowID", js_gfx_windowid, NULL),
     JS_CFUNC_DEF("initialize", 1, js_gfx_initialize),
     JS_CFUNC_DEF("delay", 1, js_gfx_delay),
     JS_CFUNC_DEF("quit", 0, js_gfx_quit),
