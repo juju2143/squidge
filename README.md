@@ -18,6 +18,12 @@ A simple game engine based on SDL 2.0 and QuickJS.
 
 Make sure you have a copy of QuickJS and SDL2 installed and just type `make`, you'll get a .so file you can import with QuickJS.
 
-## Links
+## Documentation
+
+Check [the wiki](https://github.com/juju2143/squidge/wiki)!
+
+## Links and credits
 
 Made by J. P. Savard [@juju2143](http://twitter.com/juju2143)
+
+Available under LiLiQ-P 1.1

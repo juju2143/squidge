@@ -13,6 +13,9 @@ typedef struct {
     int y;
     char* title;
     uint fullscreen;
+    float opacity;
+    SDL_bool resizable;
+    SDL_bool borders;
 } JSGfxData;
 
 static JSClassID js_gfx_class_id;
@@ -55,6 +58,9 @@ static JSValue js_gfx_ctor(JSContext *ctx,
     s->fullscreen = 0;
     s->x = SDL_WINDOWPOS_UNDEFINED;
     s->y = SDL_WINDOWPOS_UNDEFINED;
+    s->opacity = 1.0;
+    s->resizable = SDL_FALSE;
+    s->borders = SDL_TRUE;
     /* using new_target to get the prototype is necessary when the
        class is extended. */
     proto = JS_GetPropertyStr(ctx, new_target, "prototype");
@@ -426,7 +432,7 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
                 ev->next->type = event;
                 ev->next->subtype = subevent;
                 ev->next->func = argv[1];
-                ev->next->this = argv[1];
+                ev->next->this = this_val;
                 ev->next->next = NULL;
             }
             else
@@ -436,7 +442,7 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
                 events->type = event;
                 events->subtype = subevent;
                 events->func = argv[1];
-                events->this = argv[1];
+                events->this = this_val;
                 events->next = NULL;
             }
         }
@@ -595,6 +601,67 @@ static JSValue js_gfx_set_fullscreen(JSContext *ctx, JSValueConst this_val, JSVa
     return JS_UNDEFINED;
 }
 
+static JSValue js_gfx_get_opacity(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if(s->window != NULL)
+        SDL_GetWindowOpacity(s->window, &s->opacity);
+    return JS_NewFloat64(ctx, s->opacity);
+}
+
+static JSValue js_gfx_set_opacity(JSContext *ctx, JSValueConst this_val, JSValue val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    double f;
+
+    if(JS_ToFloat64(ctx, &f, val)) return JS_EXCEPTION;
+
+    if(s->window != NULL)
+    {
+        if(SDL_SetWindowOpacity(s->window, f) == 0)
+            s->fullscreen = f;
+    }
+    else
+        s->fullscreen = f;
+    return JS_UNDEFINED;
+}
+
+static JSValue js_gfx_get_resizable(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    return JS_NewBool(ctx, s->resizable);
+}
+
+static JSValue js_gfx_set_resizable(JSContext *ctx, JSValueConst this_val, JSValue val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    SDL_bool f = JS_ToBool(ctx, val);
+
+    if(s->window != NULL)
+        SDL_SetWindowResizable(s->window, f);
+    s->resizable = f;
+
+    return JS_UNDEFINED;
+}
+
+static JSValue js_gfx_get_borders(JSContext *ctx, JSValueConst this_val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    return JS_NewBool(ctx, s->borders);
+}
+
+static JSValue js_gfx_set_borders(JSContext *ctx, JSValueConst this_val, JSValue val)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    SDL_bool f = JS_ToBool(ctx, val);
+
+    if(s->window != NULL)
+        SDL_SetWindowBordered(s->window, f);
+    s->borders = f;
+
+    return JS_UNDEFINED;
+}
+
 static JSValue js_gfx_get_pixels(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
@@ -636,8 +703,10 @@ static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
 
     s->surface = SDL_GetWindowSurface(s->window);
-    //SDL_FillRect(s->surface, NULL, SDL_MapRGB(s->surface->format, 0xFF, 0xFF, 0xFF));
-    //SDL_UpdateWindowSurface(s->window);
+    SDL_SetWindowFullscreen(s->window, s->fullscreen);
+    SDL_SetWindowOpacity(s->window, s->opacity);
+    SDL_SetWindowResizable(s->window, s->resizable);
+    SDL_SetWindowBordered(s->window, s->borders);
 
     return JS_UNDEFINED;
 }
@@ -654,6 +723,9 @@ static const JSCFunctionListEntry js_gfx_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("y", js_gfx_get_pos, js_gfx_set_pos, 1),
     JS_CGETSET_DEF("title", js_gfx_get_title, js_gfx_set_title),
     JS_CGETSET_DEF("fullscreen", js_gfx_get_fullscreen, js_gfx_set_fullscreen),
+    JS_CGETSET_DEF("opacity", js_gfx_get_opacity, js_gfx_set_opacity),
+    JS_CGETSET_DEF("resizable", js_gfx_get_resizable, js_gfx_set_resizable),
+    JS_CGETSET_DEF("borders", js_gfx_get_borders, js_gfx_set_borders),
     JS_CGETSET_DEF("pixels", js_gfx_get_pixels, js_gfx_set_pixels),
     JS_CGETSET_DEF("ticks", js_gfx_ticks, NULL),
     JS_CGETSET_DEF("windowID", js_gfx_windowid, NULL),
