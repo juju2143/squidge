@@ -766,7 +766,13 @@ static int js_gfx_init(JSContext *ctx, JSModuleDef *m)
     return 0;
 }
 
-JSModuleDef *js_init_module(JSContext *ctx, const char *module_name)
+#ifdef JS_SHARED_LIBRARY
+#define JS_INIT_MODULE js_init_module
+#else
+#define JS_INIT_MODULE js_init_module_gfx
+#endif
+
+JSModuleDef *JS_INIT_MODULE(JSContext *ctx, const char *module_name)
 {
     JSModuleDef *m;
     m = JS_NewCModule(ctx, module_name, js_gfx_init);

@@ -1,15 +1,27 @@
 CC=gcc
 LD=ld
-CFLAGS=-DJS_SHARED_LIBRARY -D_REENTRANT -fPIC -Wall
-LDFLAGS=-l:quickjs/libquickjs.a -lSDL2
+QJSC=qjsc
+JSFLAGS=-M Graphics,Graphics
+CFLAGS=-D_REENTRANT -fPIC -Wall
+LDFLAGS=-fPIC
+LIBS=-lm -ldl -lpthread -lSDL2 -L/lib/quickjs -lquickjs
 
-all: gfx.so
+all: squidge
 
-gfx.so: gfx.o
-	$(LD) $(LDFLAGS) -shared -o $@ $^
+squidge: demo.o gfx.o squidge.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-gfx.o: gfx.c
-	$(CC) $(CFLAGS) -c -o $@ $^
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+%.c: %.js
+	$(QJSC) $(JSFLAGS) -c -o $@ $<
+
+gfx.so: gfx.shared.o
+	$(CC) $(LDFLAGS) -shared -o $@ $^ $(LIBS)
+
+gfx.shared.o: gfx.c
+	$(CC) $(CFLAGS) -DJS_SHARED_LIBRARY -c -o $@ $<
 
 clean:
-	rm -f *.o *.so
+	rm -f *.o *.so demo.c squidge

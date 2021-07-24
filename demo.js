@@ -1,4 +1,4 @@
-import { Graphics } from "./gfx.so";
+import { Graphics } from "Graphics";
 var gfx = new Graphics(1024, 768, "test");
 var gfx2 = new Graphics(256, 256, "colours");
 var quit = true;
