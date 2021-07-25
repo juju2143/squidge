@@ -1,4 +1,7 @@
 *.o
 *.so
+*.dll
 demo.c
 squidge
+squidge.exe
+.vscode

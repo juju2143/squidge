@@ -1,4 +1,5 @@
 #include <string.h>
+#include <inttypes.h>
 #include <quickjs/quickjs.h>
 #include <SDL2/SDL.h>
 
@@ -12,7 +13,7 @@ typedef struct {
     int x;
     int y;
     char* title;
-    uint fullscreen;
+    Uint32 fullscreen;
     float opacity;
     SDL_bool resizable;
     SDL_bool borders;
@@ -478,7 +479,7 @@ static JSValue js_gfx_rgb(JSContext *ctx, JSValueConst this_val,
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     JSValue vr,vg,vb,va;
-    uint r,g,b,a;
+    Uint32 r,g,b,a;
     if(!JS_IsObject(argv[0]))
     {
         if(argc < 3) return JS_EXCEPTION;
@@ -512,7 +513,7 @@ static JSValue js_gfx_torgb(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
-    uint pixel; u_char r, g, b, a;
+    Uint32 pixel; Uint8 r, g, b, a;
     if (JS_ToUint32(ctx, &pixel, argv[0]))
         return JS_EXCEPTION;
     SDL_GetRGBA(pixel, s->surface->format, &r, &g, &b, &a);
@@ -528,7 +529,7 @@ static JSValue js_gfx_fillrect(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
-    uint color;
+    Uint32 color;
     if(argc <= 1)
     {
         if (JS_ToUint32(ctx, &color, argv[0]))
@@ -587,7 +588,7 @@ static JSValue js_gfx_get_fullscreen(JSContext *ctx, JSValueConst this_val)
 static JSValue js_gfx_set_fullscreen(JSContext *ctx, JSValueConst this_val, JSValue val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
-    uint flags;
+    Uint32 flags;
 
     if(JS_ToUint32(ctx, &flags, val)) return JS_EXCEPTION;
 
@@ -676,7 +677,7 @@ static JSValue js_gfx_set_pixels(JSContext *ctx, JSValueConst this_val, JSValue 
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     //SDL_LockSurface(s->surface);
     size_t size; // s->surface->h * s->surface->pitch
-    u_char* buf = JS_GetArrayBuffer(ctx, &size, val);
+    uint8_t* buf = JS_GetArrayBuffer(ctx, &size, val);
     if(size > s->surface->h * s->surface->pitch) size = s->surface->h * s->surface->pitch;
     SDL_memcpy(s->surface->pixels, buf, size);
     //SDL_UnlockSurface(s->surface);
