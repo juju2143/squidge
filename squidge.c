@@ -3,7 +3,7 @@
 #include <string.h>
 #include <quickjs/quickjs.h>
 #include <quickjs/quickjs-libc.h>
-#include "gfx.h"
+#include "modules.h"
 
 #define PROG_NAME "squidge"
 #define VERSION "0"
@@ -82,6 +82,7 @@ static JSContext *JS_NewCustomContext(JSRuntime *rt)
     js_init_module_std(ctx, "std");
     js_init_module_os(ctx, "os");
     js_init_module_gfx(ctx, "Graphics");
+    js_init_module_image(ctx, "Image");
     return ctx;
 }
 
@@ -211,10 +212,12 @@ int main(int argc, char **argv)
     if (load_std) {
         const char *str = "import * as std from 'std';\n"
             "import * as os from 'os';\n"
-            "import * as Graphics from 'Graphics';\n"
+            "import { Graphics } from 'Graphics';\n"
+            "import { Image } from 'Image';\n"
             "globalThis.std = std;\n"
             "globalThis.os = os;\n"
-            "globalThis.Graphics = Graphics;\n";
+            "globalThis.Graphics = Graphics;\n"
+            "globalThis.Image = Image;\n";
         eval_buf(ctx, str, strlen(str), "<input>", JS_EVAL_TYPE_MODULE);
     }
 

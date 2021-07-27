@@ -2,24 +2,9 @@
 #include <inttypes.h>
 #include <quickjs/quickjs.h>
 #include <SDL2/SDL.h>
+#include "modules.h"
 
-#define countof(x) (sizeof(x) / sizeof((x)[0]))
-
-typedef struct {
-    SDL_Window* window;
-    SDL_Surface* surface;
-    int width;
-    int height;
-    int x;
-    int y;
-    char* title;
-    Uint32 fullscreen;
-    float opacity;
-    SDL_bool resizable;
-    SDL_bool borders;
-} JSGfxData;
-
-static JSClassID js_gfx_class_id;
+JSClassID js_gfx_class_id;
 
 static void js_gfx_finalizer(JSRuntime *rt, JSValue val)
 {
@@ -28,9 +13,10 @@ static void js_gfx_finalizer(JSRuntime *rt, JSValue val)
     if(s->window != NULL)
     {
         SDL_DestroyWindow(s->window);
+        s->surface = NULL;
         s->window = NULL;
-        SDL_Quit();
     }
+    SDL_Quit();
 
     js_free_rt(rt, s);
 }
@@ -73,6 +59,11 @@ static JSValue js_gfx_ctor(JSContext *ctx,
         goto fail;
     JS_SetOpaque(obj, s);
     return obj;
+
+    int flags = SDL_INIT_VIDEO;
+    if(SDL_Init(flags) < 0)
+        return JS_EXCEPTION;
+
  fail:
     js_free(ctx, s);
     JS_FreeValue(ctx, obj);
@@ -178,10 +169,13 @@ static JSValue js_gfx_quit(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
-    if(s->window == NULL) return JS_EXCEPTION;
-    SDL_DestroyWindow(s->window);
-    s->window = NULL;
-    SDL_Quit();
+
+    if(s->window != NULL)
+    {
+        SDL_DestroyWindow(s->window);
+        s->surface = NULL;
+        s->window = NULL;
+    }
 
     return JS_UNDEFINED;
 }
@@ -684,6 +678,25 @@ static JSValue js_gfx_set_pixels(JSContext *ctx, JSValueConst this_val, JSValue 
     return JS_UNDEFINED;
 }
 
+static JSValue js_gfx_blit(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if(argc > 1 && s->surface != NULL)
+    {
+        JSImageData *img = JS_GetOpaque2(ctx, argv[0], js_image_class_id);
+        if(img != NULL)
+        {
+            int blit = SDL_BlitSurface(img->surface, NULL, s->surface, NULL);
+            return JS_NewBool(ctx, blit == 0);
+        }
+        else
+            return JS_EXCEPTION;
+    }
+
+    return JS_EXCEPTION;
+}
+
 static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
@@ -691,23 +704,21 @@ static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,
     if (!s)
         return JS_EXCEPTION;
 
-    int flags = SDL_INIT_VIDEO;
+    if(s->window == NULL)
+    {
+        s->window = SDL_CreateWindow(s->title, s->x, s->y, s->width, s->height, SDL_WINDOW_SHOWN);
+        if(s->window == NULL)
+            return JS_EXCEPTION;
 
-    if(argc > 0) JS_ToInt32(ctx, &flags, argv[0]);
+        s->surface = SDL_GetWindowSurface(s->window);
+        if(s->surface == NULL)
+            return JS_EXCEPTION;
 
-    if(SDL_Init(flags) < 0)
-        return JS_EXCEPTION;
-
-    s->window = SDL_CreateWindow(s->title, s->x, s->y, s->width, s->height, SDL_WINDOW_SHOWN);
-
-    if(s->window==NULL)
-        return JS_EXCEPTION;
-
-    s->surface = SDL_GetWindowSurface(s->window);
-    SDL_SetWindowFullscreen(s->window, s->fullscreen);
-    SDL_SetWindowOpacity(s->window, s->opacity);
-    SDL_SetWindowResizable(s->window, s->resizable);
-    SDL_SetWindowBordered(s->window, s->borders);
+        SDL_SetWindowFullscreen(s->window, s->fullscreen);
+        SDL_SetWindowOpacity(s->window, s->opacity);
+        SDL_SetWindowResizable(s->window, s->resizable);
+        SDL_SetWindowBordered(s->window, s->borders);
+    }
 
     return JS_UNDEFINED;
 }
@@ -730,9 +741,13 @@ static const JSCFunctionListEntry js_gfx_proto_funcs[] = {
     JS_CGETSET_DEF("pixels", js_gfx_get_pixels, js_gfx_set_pixels),
     JS_CGETSET_DEF("ticks", js_gfx_ticks, NULL),
     JS_CGETSET_DEF("windowID", js_gfx_windowid, NULL),
-    JS_CFUNC_DEF("initialize", 1, js_gfx_initialize),
+    JS_CGETSET_DEF("bytesperpixel", js_gfx_bytespp, NULL),
+    JS_CGETSET_DEF("bitsperpixel", js_gfx_bitspp, NULL),
+    JS_CFUNC_DEF("initialize", 0, js_gfx_initialize),
     JS_CFUNC_DEF("delay", 1, js_gfx_delay),
     JS_CFUNC_DEF("quit", 0, js_gfx_quit),
+    JS_ALIAS_DEF("createWindow", "initialize"),
+    JS_ALIAS_DEF("destroyWindow", "quit"),
     JS_CFUNC_MAGIC_DEF("pollEvent", 0, js_gfx_pollevent, 0),
     JS_CFUNC_MAGIC_DEF("waitEvent", 1, js_gfx_pollevent, 1),
     JS_CFUNC_MAGIC_DEF("addEventListener", 2, js_gfx_events, 1),
@@ -743,8 +758,7 @@ static const JSCFunctionListEntry js_gfx_proto_funcs[] = {
     JS_CFUNC_DEF("rgb", 1, js_gfx_rgb),
     JS_CFUNC_DEF("torgb", 1, js_gfx_torgb),
     JS_CFUNC_DEF("fillRect", 1, js_gfx_fillrect),
-    JS_CGETSET_DEF("bytesperpixel", js_gfx_bytespp, NULL),
-    JS_CGETSET_DEF("bitsperpixel", js_gfx_bitspp, NULL),
+    JS_CFUNC_DEF("blit", 1, js_gfx_blit),
 };
 
 static int js_gfx_init(JSContext *ctx, JSModuleDef *m)
