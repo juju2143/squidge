@@ -682,19 +682,26 @@ static JSValue js_gfx_blit(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
-    if(argc > 1 && s->surface != NULL)
+    if(argc > 0 && s->surface != NULL)
     {
         JSImageData *img = JS_GetOpaque2(ctx, argv[0], js_image_class_id);
         if(img != NULL)
         {
-            int blit = SDL_BlitSurface(img->surface, NULL, s->surface, NULL);
+            SDL_Rect pos;
+            pos.x = 0;
+            pos.y = 0;
+            pos.w = img->surface->w;
+            pos.h = img->surface->h;
+            if(JS_ToInt32(ctx, &pos.x, argv[1]))
+                pos.x = 0;
+            if(JS_ToInt32(ctx, &pos.y, argv[2]))
+                pos.y = 0;
+            int blit = SDL_BlitSurface(img->surface, NULL, s->surface, &pos);
             return JS_NewBool(ctx, blit == 0);
         }
-        else
-            return JS_EXCEPTION;
     }
 
-    return JS_EXCEPTION;
+    return JS_FALSE;
 }
 
 static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,

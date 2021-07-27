@@ -1,5 +1,3 @@
-//import { Graphics } from "Graphics";
-//import { Image } from "Image";
 var gfx = new Graphics(1024, 768, "test");
 var gfx2 = new Graphics(256, 256, "colours");
 var quit = true;
@@ -37,13 +35,13 @@ var oldd = gfx.ticks;
 var newd;
 gfx.fillRect(gfx.rgb(255,255,255));
 var pixels = new Uint32Array(gfx2.pixels);
-var image = new Image();
+var image = new Image("image.png");
 while(quit)
 {
     gfx.pollEvent();
     for(var x=0;x<256;x++) for(var y=0;y<256;y++)
         pixels[y*gfx2.width+x] = gfx2.rgb(x,y,0);
-    //gfx.blit(image);
+    gfx.blit(image, gfx.width/2-image.width/2, gfx.height/2-image.height/2);
     gfx.update();
     gfx2.update();
     newd = gfx.ticks;
