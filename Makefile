@@ -1,17 +1,19 @@
 JSFLAGS=-M Graphics,Graphics -M Image,Image
 CFLAGS=-fPIC -Wall -Wno-discarded-qualifiers -Werror -O2
 LDFLAGS=
-LIBS=-lm
+LIBS=-lm -lpthread
 
 ifdef CONFIG_WIN32
 	CROSS_PREFIX=x86_64-w64-mingw32-
 	EXT=.exe
 	CONFIG_LOCAL=y
+	CFLAGS+=-Dmain=SDL_main
+	LIBS+=-lmingw32 -lSDL2main -lSDL2 -lSDL2_image -mwindows
 else
-	LIBS+=-ldl
+	LIBS+=-ldl -lSDL2 -lSDL2_image
 endif
 
-LIBS+=-lpthread -lSDL2 -lSDL2_image -lquickjs
+LIBS+=-lquickjs
 
 CC=$(CROSS_PREFIX)gcc
 LD=$(CROSS_PREFIX)ld
@@ -50,9 +52,10 @@ quickjs/qjsc:
 %.shared.o: %.c
 	$(CC) $(CFLAGS) -DJS_SHARED_LIBRARY -c -o $@ $<
 
-dlls:
-	cp /usr/$(CROSS_PREFIX:-=)/bin/libwinpthread-1.dll .
-	cp /usr/$(CROSS_PREFIX:-=)/bin/SDL2.dll .
+dlls: libwinpthread-1.dll SDL2.dll SDL2_image.dll
+
+%.dll:
+	cp /usr/$(CROSS_PREFIX:-=)/bin/$@ $@
 
 dist:
 	ifdef CONFIG_WIN32

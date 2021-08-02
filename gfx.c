@@ -9,6 +9,13 @@ JSClassID js_gfx_class_id;
 static void js_gfx_finalizer(JSRuntime *rt, JSValue val)
 {
     JSGfxData *s = JS_GetOpaque(val, js_gfx_class_id);
+    if (!s) goto quit;
+
+    if(s->renderer != NULL)
+    {
+        SDL_DestroyRenderer(s->renderer);
+        s->renderer = NULL;
+    }
 
     if(s->window != NULL)
     {
@@ -16,6 +23,8 @@ static void js_gfx_finalizer(JSRuntime *rt, JSValue val)
         s->surface = NULL;
         s->window = NULL;
     }
+
+quit:
     SDL_Quit();
 
     js_free_rt(rt, s);
@@ -31,7 +40,7 @@ static JSValue js_gfx_ctor(JSContext *ctx,
     
     s = js_mallocz(ctx, sizeof(*s));
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowOutOfMemory(ctx);
     if (argc < 1 || JS_ToInt32(ctx, &s->width, argv[0]))
         s->width = 800;
     if (argc < 2 || JS_ToInt32(ctx, &s->height, argv[1]))
@@ -62,7 +71,7 @@ static JSValue js_gfx_ctor(JSContext *ctx,
 
     int flags = SDL_INIT_VIDEO;
     if(SDL_Init(flags) < 0)
-        return JS_EXCEPTION;
+        return JS_ThrowInternalError(ctx, "can't init SDL");
 
  fail:
     js_free(ctx, s);
@@ -74,7 +83,7 @@ static JSValue js_gfx_get_size(JSContext *ctx, JSValueConst this_val, int magic)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "what is this");
     if(s->window != NULL)
         SDL_GetWindowSize(s->window, &s->width, &s->height);
     if (magic == 0)
@@ -88,9 +97,9 @@ static JSValue js_gfx_set_size(JSContext *ctx, JSValueConst this_val, JSValue va
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     int v;
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "what is this");
     if (JS_ToInt32(ctx, &v, val))
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "expected an integer");
     if (magic == 0)
         s->width = v;
     else
@@ -104,7 +113,7 @@ static JSValue js_gfx_get_title(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "what is this");
 
     if(s->window != NULL)
         s->title = SDL_GetWindowTitle(s->window);
@@ -116,7 +125,7 @@ static JSValue js_gfx_set_title(JSContext *ctx, JSValueConst this_val, JSValue v
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "what is this");
 
     s->title = JS_ToCString(ctx, val);
     if(s->window != NULL)
@@ -129,7 +138,7 @@ static JSValue js_gfx_get_pos(JSContext *ctx, JSValueConst this_val, int magic)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "what is this");
     if(s->window != NULL)
         SDL_GetWindowPosition(s->window, &s->x, &s->y);
     if (magic == 0)
@@ -143,9 +152,9 @@ static JSValue js_gfx_set_pos(JSContext *ctx, JSValueConst this_val, JSValue val
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     int v;
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "what is this");
     if (JS_ToInt32(ctx, &v, val))
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "expected an integer");
     if (magic == 0)
         s->x = v;
     else
@@ -169,6 +178,14 @@ static JSValue js_gfx_quit(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
+
+    if(s->renderer != NULL)
+    {
+        SDL_DestroyRenderer(s->renderer);
+        s->renderer = NULL;
+    }
 
     if(s->window != NULL)
     {
@@ -184,21 +201,14 @@ static JSValue js_gfx_update(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
-    if(s->window == NULL) return JS_EXCEPTION;
-    SDL_UpdateWindowSurface(s->window);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
+    if(s->window == NULL) return JS_UNDEFINED;
+    //SDL_UpdateWindowSurface(s->window);
+    SDL_RenderPresent(s->renderer);
 
     return JS_UNDEFINED;
 }
-
-typedef struct eventlist {
-    struct eventlist *next;
-    int type;
-    int subtype;
-    JSValue func;
-    JSValue this;
-} event_t;
-
-static event_t *events = NULL;
 
 JSValue createEventObject(JSContext *ctx, SDL_Event e)
 {
@@ -325,7 +335,7 @@ JSValue createEventObject(JSContext *ctx, SDL_Event e)
     return ev;
 }
 
-void callEvent(JSContext *ctx, SDL_Event e)
+void callEvent(JSContext *ctx, event_t* events, SDL_Event e)
 {
     event_t *ev;
     for(ev = events; ev != NULL; ev = ev->next)
@@ -344,26 +354,29 @@ void callEvent(JSContext *ctx, SDL_Event e)
 static JSValue js_gfx_pollevent(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv, int magic)
 {
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     SDL_Event e;
     if(magic == 0)
     {
-        while(SDL_PollEvent(&e) != 0) callEvent(ctx, e);
+        while(SDL_PollEvent(&e) != 0) callEvent(ctx, s->events, e);
     }
     else if(argc > 0)
     {
         int time;
         if(JS_ToInt32(ctx, &time, argv[0]))
         {
-            if(SDL_WaitEvent(&e) != 0) callEvent(ctx, e);
+            if(SDL_WaitEvent(&e) != 0) callEvent(ctx, s->events, e);
         }
         else
         {
-            if(SDL_WaitEventTimeout(&e, time) != 0) callEvent(ctx, e);
+            if(SDL_WaitEventTimeout(&e, time) != 0) callEvent(ctx, s->events, e);
         }
     }
     else
     {
-        if(SDL_WaitEvent(&e) != 0) callEvent(ctx, e);
+        if(SDL_WaitEvent(&e) != 0) callEvent(ctx, s->events, e);
     }
     return JS_UNDEFINED;
 }
@@ -371,7 +384,10 @@ static JSValue js_gfx_pollevent(JSContext *ctx, JSValueConst this_val,
 static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv, int magic)
 {
-    if(argc == 0) return JS_EXCEPTION;
+    JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
+    if(argc == 0) return JS_FALSE;
 
     const char* name = JS_ToCString(ctx, argv[0]);
 
@@ -411,14 +427,14 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
     if(strcmp(name, "keyblur") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_FOCUS_LOST; }
     if(strcmp(name, "close") == 0) { event = SDL_WINDOWEVENT; subevent = SDL_WINDOWEVENT_CLOSE; }
 
-    if(event == 0) return JS_EXCEPTION;
+    if(event == 0) return JS_FALSE;
 
     if(magic == 1)
     {
         if(argc > 1)
         {
-            if(!JS_IsObject(argv[1])) return JS_EXCEPTION;
-            event_t *ev = events;
+            if(!JS_IsObject(argv[1])) return JS_FALSE;
+            event_t *ev = s->events;
             if(ev != NULL)
             {
                 while(ev->next != NULL) ev = ev->next;
@@ -432,20 +448,20 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
             }
             else
             {
-                events = (event_t*)malloc(sizeof(event_t));
+                s->events = (event_t*)malloc(sizeof(event_t));
                 //if(ev->next == NULL) return JS_EXCEPTION;
-                events->type = event;
-                events->subtype = subevent;
-                events->func = argv[1];
-                events->this = this_val;
-                events->next = NULL;
+                s->events->type = event;
+                s->events->subtype = subevent;
+                s->events->func = argv[1];
+                s->events->this = this_val;
+                s->events->next = NULL;
             }
         }
         else
         {
             // TODO: runs a fake event or removes the event or do nothing?
             event_t *ev;
-            for(ev = events; ev != NULL; ev = ev->next)
+            for(ev = s->events; ev != NULL; ev = ev->next)
             {
                 if(event == ev->type)
                 {
@@ -465,18 +481,20 @@ static JSValue js_gfx_events(JSContext *ctx, JSValueConst this_val,
         // TODO: removeEventHandler
     }
 
-    return JS_UNDEFINED;
+    return JS_TRUE;
 }
 
 static JSValue js_gfx_rgb(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     JSValue vr,vg,vb,va;
     Uint32 r,g,b,a;
     if(!JS_IsObject(argv[0]))
     {
-        if(argc < 3) return JS_EXCEPTION;
+        if(argc < 3) return JS_ThrowTypeError(ctx, "expected at least 3 integers");
         vr = argv[0];
         vg = argv[1];
         vb = argv[2];
@@ -491,11 +509,11 @@ static JSValue js_gfx_rgb(JSContext *ctx, JSValueConst this_val,
         va = JS_GetPropertyStr(ctx, argv[0], "a");
     }
     if (JS_ToUint32(ctx, &r, vr))
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "expected an integer");
     if (JS_ToUint32(ctx, &g, vg))
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "expected an integer");
     if (JS_ToUint32(ctx, &b, vb))
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "expected an integer");
     if (JS_ToUint32(ctx, &a, va))
         return JS_NewUint32(ctx, SDL_MapRGB(s->surface->format, r, g, b));
     else
@@ -507,9 +525,11 @@ static JSValue js_gfx_torgb(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     Uint32 pixel; Uint8 r, g, b, a;
     if (JS_ToUint32(ctx, &pixel, argv[0]))
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "expected an integer");
     SDL_GetRGBA(pixel, s->surface->format, &r, &g, &b, &a);
     JSValue rgb = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, rgb, "r", JS_NewUint32(ctx, r));
@@ -523,27 +543,36 @@ static JSValue js_gfx_fillrect(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
+    if(s->surface == NULL || s->renderer == NULL)
+        return JS_ThrowInternalError(ctx, "uninitialized window");
     Uint32 color;
+    if (JS_ToUint32(ctx, &color, argv[0]))
+        return JS_ThrowTypeError(ctx, "expected an integer");
+
+    Uint8 r,g,b,a;
+    SDL_GetRGBA(color, s->surface->format, &r, &g, &b, &a);
+    SDL_SetRenderDrawColor(s->renderer, r, g, b, a);
+
     if(argc <= 1)
     {
-        if (JS_ToUint32(ctx, &color, argv[0]))
-            return JS_EXCEPTION;
-        return JS_NewBool(ctx, SDL_FillRect(s->surface, NULL, color) == 0);
+        return JS_NewBool(ctx, SDL_RenderFillRect(s->renderer, NULL) == 0);
     }
     else
     {
         SDL_Rect rect;
         if (JS_ToInt32(ctx, &rect.x, argv[0]))
-            return JS_EXCEPTION;
+            return JS_ThrowTypeError(ctx, "expected an integer");
         if (JS_ToInt32(ctx, &rect.y, argv[1]))
-            return JS_EXCEPTION;
+            return JS_ThrowTypeError(ctx, "expected an integer");
         if (JS_ToInt32(ctx, &rect.w, argv[2]))
-            return JS_EXCEPTION;
+            return JS_ThrowTypeError(ctx, "expected an integer");
         if (JS_ToInt32(ctx, &rect.h, argv[3]))
-            return JS_EXCEPTION;
+            return JS_ThrowTypeError(ctx, "expected an integer");
         if (JS_ToUint32(ctx, &color, argv[4]))
-            return JS_EXCEPTION;
-        return JS_NewBool(ctx, SDL_FillRect(s->surface, &rect, color) == 0);
+            return JS_ThrowTypeError(ctx, "expected an integer");
+        return JS_NewBool(ctx, SDL_RenderFillRect(s->renderer, &rect) == 0);
     }
 }
 
@@ -555,6 +584,8 @@ static JSValue js_gfx_ticks(JSContext *ctx, JSValueConst this_val)
 static JSValue js_gfx_windowid(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     if(s->window != NULL)
         return JS_NewUint32(ctx, SDL_GetWindowID(s->window));
     else
@@ -564,27 +595,35 @@ static JSValue js_gfx_windowid(JSContext *ctx, JSValueConst this_val)
 static JSValue js_gfx_bytespp(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     return JS_NewUint32(ctx, s->surface->format->BytesPerPixel);
 }
 
 static JSValue js_gfx_bitspp(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     return JS_NewUint32(ctx, s->surface->format->BitsPerPixel);
 }
 
 static JSValue js_gfx_get_fullscreen(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     return JS_NewUint32(ctx, s->fullscreen);
 }
 
 static JSValue js_gfx_set_fullscreen(JSContext *ctx, JSValueConst this_val, JSValue val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     Uint32 flags;
 
-    if(JS_ToUint32(ctx, &flags, val)) return JS_EXCEPTION;
+    if(JS_ToUint32(ctx, &flags, val)) return JS_ThrowTypeError(ctx, "expected an integer");
 
     if(s->window != NULL)
     {
@@ -599,6 +638,8 @@ static JSValue js_gfx_set_fullscreen(JSContext *ctx, JSValueConst this_val, JSVa
 static JSValue js_gfx_get_opacity(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     if(s->window != NULL)
         SDL_GetWindowOpacity(s->window, &s->opacity);
     return JS_NewFloat64(ctx, s->opacity);
@@ -607,9 +648,11 @@ static JSValue js_gfx_get_opacity(JSContext *ctx, JSValueConst this_val)
 static JSValue js_gfx_set_opacity(JSContext *ctx, JSValueConst this_val, JSValue val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     double f;
 
-    if(JS_ToFloat64(ctx, &f, val)) return JS_EXCEPTION;
+    if(JS_ToFloat64(ctx, &f, val)) return JS_ThrowTypeError(ctx, "expected a float");
 
     if(s->window != NULL)
     {
@@ -624,12 +667,16 @@ static JSValue js_gfx_set_opacity(JSContext *ctx, JSValueConst this_val, JSValue
 static JSValue js_gfx_get_resizable(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     return JS_NewBool(ctx, s->resizable);
 }
 
 static JSValue js_gfx_set_resizable(JSContext *ctx, JSValueConst this_val, JSValue val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     SDL_bool f = JS_ToBool(ctx, val);
 
     if(s->window != NULL)
@@ -642,12 +689,16 @@ static JSValue js_gfx_set_resizable(JSContext *ctx, JSValueConst this_val, JSVal
 static JSValue js_gfx_get_borders(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     return JS_NewBool(ctx, s->borders);
 }
 
 static JSValue js_gfx_set_borders(JSContext *ctx, JSValueConst this_val, JSValue val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     SDL_bool f = JS_ToBool(ctx, val);
 
     if(s->window != NULL)
@@ -660,6 +711,12 @@ static JSValue js_gfx_set_borders(JSContext *ctx, JSValueConst this_val, JSValue
 static JSValue js_gfx_get_pixels(JSContext *ctx, JSValueConst this_val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
+
+    if(s->surface == NULL)
+        return JS_ThrowInternalError(ctx, "unintialized window");
+
     //SDL_LockSurface(s->surface);
     JSValue pixels = JS_NewArrayBuffer(ctx, s->surface->pixels, s->surface->h * s->surface->pitch, NULL, NULL, 0);
     //SDL_UnlockSurface(s->surface);
@@ -669,6 +726,12 @@ static JSValue js_gfx_get_pixels(JSContext *ctx, JSValueConst this_val)
 static JSValue js_gfx_set_pixels(JSContext *ctx, JSValueConst this_val, JSValue val)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
+
+    if(s->surface == NULL)
+        return JS_ThrowInternalError(ctx, "unintialized window");
+
     //SDL_LockSurface(s->surface);
     size_t size; // s->surface->h * s->surface->pitch
     uint8_t* buf = JS_GetArrayBuffer(ctx, &size, val);
@@ -682,6 +745,8 @@ static JSValue js_gfx_blit(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
+    if (!s)
+        return JS_ThrowTypeError(ctx, "what is this");
     if(argc > 0 && s->surface != NULL)
     {
         JSImageData *img = JS_GetOpaque2(ctx, argv[0], js_image_class_id);
@@ -709,17 +774,21 @@ static JSValue js_gfx_initialize(JSContext *ctx, JSValueConst this_val,
 {
     JSGfxData *s = JS_GetOpaque2(ctx, this_val, js_gfx_class_id);
     if (!s)
-        return JS_EXCEPTION;
+        return JS_ThrowTypeError(ctx, "what is this");
 
     if(s->window == NULL)
     {
         s->window = SDL_CreateWindow(s->title, s->x, s->y, s->width, s->height, SDL_WINDOW_SHOWN);
         if(s->window == NULL)
-            return JS_EXCEPTION;
+            return JS_ThrowInternalError(ctx, "can't create window");
+
+        s->renderer = SDL_CreateRenderer(s->window, -1, 0);
+        if(s->renderer == NULL)
+            return JS_ThrowInternalError(ctx, "can't create renderer");
 
         s->surface = SDL_GetWindowSurface(s->window);
         if(s->surface == NULL)
-            return JS_EXCEPTION;
+            return JS_ThrowInternalError(ctx, "can't get window surface");
 
         SDL_SetWindowFullscreen(s->window, s->fullscreen);
         SDL_SetWindowOpacity(s->window, s->opacity);

@@ -11,9 +11,19 @@ extern "C" {
 
 #define countof(x) (sizeof(x) / sizeof((x)[0]))
 
+typedef struct eventlist {
+    struct eventlist *next;
+    int type;
+    int subtype;
+    JSValue func;
+    JSValue this;
+} event_t;
+
 typedef struct {
     SDL_Window* window;
     SDL_Surface* surface;
+    SDL_Renderer* renderer;
+    event_t* events;
     int width;
     int height;
     int x;
